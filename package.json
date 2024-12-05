@@ -1,0 +1,16 @@
+{
+  "name": "fetch-issue-titles",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Helper node script to fetch GitHub issue titles",
+  "main": "fetch.js",
+  "scripts": {},
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "repository": "https://github.com/samprintz/vim-issue-augmentation-plugin",
+  "dependencies": {
+    "@octokit/rest": "^20.0.2",
+    "fs": "^0.0.1-security"
+  }
+}
