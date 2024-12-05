@@ -76,7 +76,7 @@ class GraphQLTitleFetcher extends GitHubFetcher {
         let totalPages = Math.ceil(limit / this.perPage);
 
         while (hasNextPage) {
-            process.stderr.write(`Fetching ${itemType} page ${page}/${totalPages}\r`);
+            process.stderr.write(`Fetching ${itemType} page ${page}/${totalPages}           \r`);
 
             const response = await graphql({
                 query: this.query(itemType),
@@ -222,4 +222,4 @@ items.forEach((item) => {
     console.log(`${item.number},${item.title}`);
 });
 
-console.log(`Fetched ${items.length} titles`);
+process.stderr.write(`Fetched ${items.length} titles          \n`);
