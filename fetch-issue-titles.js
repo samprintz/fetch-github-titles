@@ -5,8 +5,8 @@ import {graphql} from "@octokit/graphql";
 import fs from 'fs';
 
 
-if (process.argv.length < 6) {
-    console.log('Usage: node ' + process.argv[1] + ' <user-or-organisation> <repo> <personal-access-token-file> <output-file>');
+if (process.argv.length < 5) {
+    console.log('Usage: node ' + process.argv[1] + ' <user-or-organisation> <repo> <personal-access-token-file>');
     process.exit(1);
 }
 
@@ -220,10 +220,8 @@ const titles = [
 ];
 
 
-fs.rmSync(outputFile, {force: true});
-
 titles.forEach((itemTitle) => {
-    fs.appendFileSync(outputFile, `${itemTitle}\n`, 'utf8');
+    console.log(itemTitle);
 });
 
 console.log(`Written ${titles.length} titles to ${outputFile}`);
