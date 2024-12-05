@@ -68,7 +68,7 @@ class GraphQLTitleFetcher extends GitHubFetcher {
      * @returns {Promise<string[]>}
      */
     async fetch(limit, itemType) {
-        const itemTitles = [];
+        const items = [];
 
         let hasNextPage = true;
         let cursor = null;
@@ -91,8 +91,9 @@ class GraphQLTitleFetcher extends GitHubFetcher {
             });
 
             if (hasNextPage) {
-                const fetchedTitles = response.repository[itemType].edges.map(edge => `${edge.node.number},${edge.node.title}`);
-                itemTitles.push(...fetchedTitles);
+                response.repository[itemType].edges
+                    .forEach(edge => items.push({"number": edge.node.number, "title": edge.node.title}));
+
                 hasNextPage = response.repository[itemType].pageInfo.hasNextPage;
                 cursor = response.repository[itemType].pageInfo.endCursor;
             }
@@ -100,7 +101,7 @@ class GraphQLTitleFetcher extends GitHubFetcher {
             page++;
         }
 
-        return itemTitles;
+        return items;
     }
 
     constructor(owner, repo, authKey) {
@@ -130,7 +131,7 @@ class RESTTitleFetcher extends GitHubFetcher {
      * @returns {Promise<string[]>}
      */
     async fetch(limit) {
-        const titles = [];
+        const items = [];
 
         const totalPages = Math.ceil(limit / this.perPage);
         const pageNrList = Array.from({length: totalPages}, (_, i) => i + 1);
@@ -150,14 +151,13 @@ class RESTTitleFetcher extends GitHubFetcher {
 
         responses.forEach((response) => {
             if (response.status === 'fulfilled') {
-                const fetchedTitles = response.value?.data.map(issue => `${issue.number},${issue.title}`);
-                titles.push(...fetchedTitles);
+                response.value?.data.forEach(item => items.push({"number": item.number, "title": item.title}));
             } else {
                 console.error('Error:', response.reason);
             }
         });
 
-        return titles;
+        return items;
     }
 
 }
@@ -214,14 +214,13 @@ class ItemCountFetcher extends GitHubFetcher {
 const itemCounts = await new ItemCountFetcher(owner, repo, authKey).fetch();
 const totalIssues = itemCounts["issues"] + itemCounts["pullRequests"];
 
-const titles = [
+const items = [
     ...await new RESTTitleFetcher(owner, repo, authKey).fetch(totalIssues),
     ...await new GraphQLTitleFetcher(owner, repo, authKey).fetch(itemCounts["discussions"], "discussions"),
 ];
 
-
-titles.forEach((itemTitle) => {
-    console.log(itemTitle);
+items.forEach((item) => {
+    console.log(`${item.number},${item.title}`);
 });
 
-console.log(`Written ${titles.length} titles to ${outputFile}`);
+console.log(`Written ${items.length} titles to ${outputFile}`);
