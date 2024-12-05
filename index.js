@@ -13,7 +13,6 @@ if (process.argv.length < 5) {
 const owner = process.argv[2];
 const repo = process.argv[3];
 const keyFile = process.argv[4];
-const outputFile = process.argv[5];
 
 const authKey = fs.readFileSync(keyFile, 'utf8');
 
@@ -223,4 +222,4 @@ items.forEach((item) => {
     console.log(`${item.number},${item.title}`);
 });
 
-console.log(`Written ${items.length} titles to ${outputFile}`);
+console.log(`Fetched ${items.length} titles`);
