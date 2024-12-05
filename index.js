@@ -219,7 +219,7 @@ const items = [
 ];
 
 items.forEach((item) => {
-    console.log(`${item.number},${item.title}`);
+    console.log(`${item.number}\t${item.title}`);
 });
 
 process.stderr.write(`Fetched ${items.length} titles          \n`);
