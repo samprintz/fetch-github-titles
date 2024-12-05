@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 import {Octokit} from '@octokit/rest';
 import {graphql} from "@octokit/graphql";
 import fs from 'fs';
@@ -17,89 +18,32 @@ const outputFile = process.argv[5];
 const authKey = fs.readFileSync(keyFile, 'utf8');
 
 
-/**
- *
- * @param {string} owner
- * @param {string} repo
- * @returns {Promise<{discussions: int, pullRequests: int, issues: int}>}
- */
-const fetchRepoStats = async (owner, repo) => {
-    const query = `
-    query ($owner: String!, $repo: String!) {
-      repository(owner: $owner, name: $repo) {
-        issues {
-          totalCount
-        }
-        pullRequests {
-          totalCount
-        }
-        discussions {
-          totalCount
-        }
-      }
+class GitHubFetcher {
+
+    owner;
+
+    repo;
+
+    authKey;
+
+    constructor(owner, repo, authKey) {
+        this.owner = owner;
+        this.repo = repo;
+        this.authKey = authKey;
     }
-  `;
 
-    try {
-        const response = await graphql({
-            query,
-            owner,
-            repo,
-            headers: {
-                authorization: `token ${authKey}`
-            }
-        });
-
-        return {
-            "issues": response.repository.issues.totalCount,
-            "pullRequests": response.repository.pullRequests.totalCount,
-            "discussions": response.repository.discussions.totalCount,
-        };
-    } catch (error) {
-        console.error("Error fetching repository stats:", error);
-    }
-};
-
-const issuesPerPage = 100;
-
-const octokit = new Octokit({
-    auth: authKey,
-});
-
-async function fetchIssueTitles(owner, repo, totalIssues) {
-    const itemTitles = [];
-
-    const totalPages = Math.ceil(totalIssues / issuesPerPage);
-    const pageNrList = Array.from({length: totalPages}, (_, i) => i + 1);
-
-    const responses = await Promise.allSettled(pageNrList.map((page) => {
-        process.stdout.write(`Fetching issues/pull requests page ${page}/${totalPages}\r`);
-
-        return octokit.issues.listForRepo({
-            owner,
-            repo,
-            filter: "all",
-            state: "all",
-            per_page: issuesPerPage,
-            page,
-        });
-    }));
-
-    responses.forEach((response) => {
-        if (response.status === 'fulfilled') {
-            const fetchedTitles = response.value?.data.map(issue => `${issue.number},${issue.title}`);
-            itemTitles.push(...fetchedTitles);
-        } else {
-            console.error('Error:', response.reason);
-        }
-    });
-
-    return itemTitles;
 }
 
-const perPage = 100;
 
-const query = itemType => `
+/**
+ * Fetch issue, pull request or discussion titles.
+ * Cursor-based fetching without parallelization.
+ */
+class GraphQLTitleFetcher extends GitHubFetcher {
+
+    perPage = 100;
+
+    query = itemType => `
     query($owner: String!, $repo: String!, $perPage: Int, $cursor: String) {
       repository(owner: $owner, name: $repo) {
         ${itemType}(first: $perPage, after: $cursor) {
@@ -118,68 +62,168 @@ const query = itemType => `
     }
   `;
 
-async function fetchItemTitles(owner, repo, itemType, totalCount) {
-    const itemTitles = [];
+    /**
+     * @param {int} limit
+     * @param {string} itemType
+     * @returns {Promise<string[]>}
+     */
+    async fetch(limit, itemType) {
+        const itemTitles = [];
 
-    let hasNextPage = true;
-    let cursor = null;
+        let hasNextPage = true;
+        let cursor = null;
 
-    let page = 1;
-    let totalPages = Math.ceil(totalCount / perPage);
+        let page = 1;
+        let totalPages = Math.ceil(limit / this.perPage);
 
-    while (hasNextPage) {
-        process.stdout.write(`Fetching ${itemType} page ${page}/${totalPages}\r`);
-        const response = await graphql({
-            query: query(itemType),
-            owner,
-            repo,
-            perPage,
-            cursor,
-            headers: {
-                authorization: `token ${authKey}`
+        while (hasNextPage) {
+            process.stderr.write(`Fetching ${itemType} page ${page}/${totalPages}\r`);
+
+            const response = await graphql({
+                query: this.query(itemType),
+                owner,
+                repo,
+                perPage: this.perPage,
+                cursor,
+                headers: {
+                    authorization: `token ${authKey}`
+                }
+            });
+
+            if (hasNextPage) {
+                const fetchedTitles = response.repository[itemType].edges.map(edge => `${edge.node.number},${edge.node.title}`);
+                itemTitles.push(...fetchedTitles);
+                hasNextPage = response.repository[itemType].pageInfo.hasNextPage;
+                cursor = response.repository[itemType].pageInfo.endCursor;
+            }
+
+            page++;
+        }
+
+        return itemTitles;
+    }
+
+    constructor(owner, repo, authKey) {
+        super(owner, repo, authKey)
+    }
+
+}
+
+/**
+ * Fetch issue and pull request titles.
+ * Requests are sent in parallel for speed-up.
+ */
+class RESTTitleFetcher extends GitHubFetcher {
+
+    perPage = 100;
+
+    constructor(owner, repo, authKey) {
+        super(owner, repo, authKey);
+
+        this.octokit = new Octokit({
+            auth: this.authKey,
+        });
+    }
+
+    /**
+     * @param {int} limit
+     * @returns {Promise<string[]>}
+     */
+    async fetch(limit) {
+        const titles = [];
+
+        const totalPages = Math.ceil(limit / this.perPage);
+        const pageNrList = Array.from({length: totalPages}, (_, i) => i + 1);
+
+        const responses = await Promise.allSettled(pageNrList.map((page) => {
+            process.stderr.write(`Fetching issues/pull requests page ${page}/${totalPages}\r`);
+
+            return this.octokit.issues.listForRepo({
+                owner: this.owner,
+                repo: this.repo,
+                filter: "all",
+                state: "all",
+                per_page: this.perPage,
+                page,
+            });
+        }));
+
+        responses.forEach((response) => {
+            if (response.status === 'fulfilled') {
+                const fetchedTitles = response.value?.data.map(issue => `${issue.number},${issue.title}`);
+                titles.push(...fetchedTitles);
+            } else {
+                console.error('Error:', response.reason);
             }
         });
 
-        if (hasNextPage) {
-            const fetchedTitles = response.repository[itemType].edges.map(edge => `${edge.node.number},${edge.node.title}`);
-            itemTitles.push(...fetchedTitles);
-            hasNextPage = response.repository[itemType].pageInfo.hasNextPage;
-            cursor = response.repository[itemType].pageInfo.endCursor;
-        }
-
-        page++;
+        return titles;
     }
 
-    return itemTitles;
 }
 
-async function fetchTitles(owner, repo, repoStats) {
-    const titles = {};
+class ItemCountFetcher extends GitHubFetcher {
 
-    for (const itemType in repoStats) {
-        // for performance reasons only discussions with graphql
-        if (itemType === "discussions") {
-            titles[itemType] = await fetchItemTitles(owner, repo, itemType, repoStats[itemType]);
+    query = `
+    query ($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        issues {
+          totalCount
+        }
+        pullRequests {
+          totalCount
+        }
+        discussions {
+          totalCount
+        }
+      }
+    }
+  `;
+
+    constructor(owner, repo, authKey) {
+        super(owner, repo, authKey);
+    }
+
+    /**
+     * @returns {Promise<{discussions: int, pullRequests: int, issues: int}>}
+     */
+    async fetch() {
+        try {
+            const response = await graphql({
+                query: this.query,
+                owner: this.owner,
+                repo: this.repo,
+                headers: {
+                    authorization: `token ${this.authKey}`
+                }
+            });
+
+            return {
+                "issues": response.repository.issues.totalCount,
+                "pullRequests": response.repository.pullRequests.totalCount,
+                "discussions": response.repository.discussions.totalCount,
+            };
+        } catch (error) {
+            console.error("Error fetching repository stats:", error);
         }
     }
 
-    // fetch issues and pull requests via REST
-    const totalIssues = repoStats["issues"] + repoStats["pullRequests"];
-    titles["issues"] = await fetchIssueTitles(owner, repo, totalIssues);
-
-    return titles;
 }
 
-const repoStats = await fetchRepoStats(owner, repo);
-const titles = await fetchTitles(owner, repo, repoStats)
+
+const itemCounts = await new ItemCountFetcher(owner, repo, authKey).fetch();
+const totalIssues = itemCounts["issues"] + itemCounts["pullRequests"];
+
+const titles = [
+    ...await new RESTTitleFetcher(owner, repo, authKey).fetch(totalIssues),
+    ...await new GraphQLTitleFetcher(owner, repo, authKey).fetch(itemCounts["discussions"], "discussions"),
+];
+
 
 fs.rmSync(outputFile, {force: true});
 
-for (const [itemType, itemTitles] of Object.entries(titles)) {
-    itemTitles.forEach((itemTitle) => {
-            fs.appendFileSync(outputFile, `${itemTitle}\n`, 'utf8');
-        }
-    );
-}
+titles.forEach((itemTitle) => {
+    fs.appendFileSync(outputFile, `${itemTitle}\n`, 'utf8');
+});
 
-console.log(`Written ${titles.issues.length} issue/pull request and ${titles.discussions.length} discussion titles to ${outputFile}`);
+console.log(`Written ${titles.length} titles to ${outputFile}`);
